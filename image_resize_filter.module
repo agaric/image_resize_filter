@@ -1,0 +1,25 @@
+<?php
+
+/**
+ * @file
+ * Contains image_resize_filter.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ */
+function image_resize_filter_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the image_resize_filter module.
+    case 'help.page.image_resize_filter':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Resizes images based on width and height attributes and optionally link to the original image.') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+

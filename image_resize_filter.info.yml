@@ -1,0 +1,8 @@
+name: Image resize filter
+type: module
+description: Resizes images based on width and height attributes and optionally link to the original image
+core: 8.x
+package: Filters
+configure: filter.admin_overview
+dependencies:
+  - filter
