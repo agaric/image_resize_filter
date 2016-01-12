@@ -8,13 +8,13 @@ _NOTE_
 
 
 
-The original plan is to provide two filters: one to creating an image derivate
-and the other to link the derivate to the source (original) image. For now,
+The original plan is to provide two filters: one to create an image derivative
+and the other to link the derivative to the source (original) image. For now,
 only the latter has been implemented.
 
 ### Installation
 
-Install per normal https://www.drupal.org/documentation/install/modules-themes/modules-8.
+Normal installation https://www.drupal.org/documentation/install/modules-themes/modules-8.
 
 ### Credits
 
