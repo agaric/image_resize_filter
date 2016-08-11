@@ -9,6 +9,7 @@ use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\filter\FilterProcessResult;
 use Drupal\filter\Plugin\FilterBase;
 use Drupal\Core\Entity\EntityRepositoryInterface;
+use Drupal\Core\File\FileSystemInterface;
 
 /**
  * Provides a filter to resize images.
@@ -22,8 +23,24 @@ use Drupal\Core\Entity\EntityRepositoryInterface;
  */
 class FilterImageResize extends FilterBase implements ContainerFactoryPluginInterface {
 
+  /**
+   * The EntityRepository instance.
+   *
+   * @var EntityRepositoryInterface
+   */
   protected $entityRepository;
+  /**
+   * ImageFactory instance.
+   *
+   * @var ImageFactory
+   */
   protected $imageFactory;
+  /**
+   * The FileSystem instance.
+   *
+   * @var FileSystemInterface
+   */
+  protected $fileSystem;
 
   /**
    * FilterImageResize constructor.
@@ -35,10 +52,17 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    * @param \Drupal\Core\Image\ImageFactory $image_factory
    *   Image Factory.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityRepositoryInterface $entity_repository, ImageFactory $image_factory) {
+  public function __construct(
+    array $configuration,
+    $plugin_id,
+    $plugin_definition,
+    EntityRepositoryInterface $entity_repository,
+    ImageFactory $image_factory,
+    FileSystemInterface $file_system) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
     $this->entityRepository = $entity_repository;
     $this->imageFactory = $image_factory;
+    $this->fileSystem = $file_system;
   }
 
   /**
@@ -50,7 +74,8 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       $plugin_id,
       $plugin_definition,
       $container->get('entity.repository'),
-      $container->get('image.factory')
+      $container->get('image.factory'),
+      $container->get('file_system')
     );
   }
 
@@ -58,16 +83,12 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    * {@inheritdoc}
    */
   public function process($text, $langcode) {
-    $images = $this->getImages($text);
-    dpm($images);
-    $result = new FilterProcessResult($text);
-    return $result;
+    return new FilterProcessResult($this->getImages($text));
   }
 
   /**
    * Locate all images in a piece of text that need replacing.
    *
-   * @param array $settings
    *   An array of settings that will be used to identify which images need
    *   updating. Includes the following:
    *
@@ -75,6 +96,7 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    *     of the following values: "remote". Remote image will be downloaded and
    *     saved locally. This procedure is intensive as the images need to
    *     be retrieved to have their dimensions checked.
+   *
    * @param string $text
    *   The text to be updated with the new img src tags.
    *
@@ -82,19 +104,6 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    *   An list of images.
    */
   private function getImages($text) {
-    // If getting this far, the image exists and is not the right size, needs
-    // to be saved locally from a remote server, or needs attributes added.
-    // Add all information to a list of images that need resizing.
-    // @todo determine if these values are needed to get the resize.
-    // $images[] = array(
-    // 'attributes' => $attributes,
-    // 'resize' => $resize,
-    // 'img_tag' => $img_tag,
-    // 'has_link' => $has_link,
-    // 'original_query' => $src_query,
-    // 'extension' => $extension,
-    // );
-    $images = [];
     $dom = Html::load($text);
     $xpath = new \DOMXPath($dom);
     /** @var \DOMNode $node */
@@ -102,26 +111,27 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       $file = $this->entityRepository->loadEntityByUuid('file', $node->getAttribute('data-entity-uuid'));
       $image = $this->imageFactory->get($file->getFileUri());
 
-      // Read the data-align attribute's value, then delete it.
-      $images[] = [
-        'uuid' => $node->getAttribute('data-entity-uuid'),
-        'expected_size' => [
-          'width' => $node->getAttribute('width'),
-          'height' => $node->getAttribute('height'),
-        ],
-        'actual_size' => [
-          'width' => $image->getWidth(),
-          'height' => $image->getHeight(),
-        ],
-        'original' => $node->getAttribute('src'),
-        // @todo Support for remote images.
-        'location' => 'local',
-        'local_path' => $image->getSource(),
-        //'name' => $image->
-        'mime' => $image->getMimeType(),
-      ];
+      // Checking if the image needs to be resized.
+      if ($image->getWidth() == $node->getAttribute('width') && $image->getHeight() == $node->getAttribute('height')) {
+        continue;
+      }
+
+      // Checking if the image was already resized:
+      if (file_exists('public://resize/' . $file->label())) {
+        $node->setAttribute('src', file_create_url('public://resize/' . $file->label()));
+        continue;
+      }
+      // Checks if the resize filter exists if is not then create it.
+      if (!file_exists('public://resize')) {
+        $this->fileSystem->mkdir('public://resize');
+      }
+      $copy = file_unmanaged_copy($file->getFileUri(), 'public://resize/' . $file->label(), FILE_EXISTS_REPLACE);
+      $copy_image = $this->imageFactory->get($copy);
+      $copy_image->resize($node->getAttribute('width'), $node->getAttribute('height'));
+      $copy_image->save();
+      $node->setAttribute('src', $copy);
     }
-    return $images;
+    return Html::serialize($dom);
   }
 
 }
