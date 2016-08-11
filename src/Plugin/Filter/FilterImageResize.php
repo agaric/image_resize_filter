@@ -129,7 +129,7 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       $copy_image = $this->imageFactory->get($copy);
       $copy_image->resize($node->getAttribute('width'), $node->getAttribute('height'));
       $copy_image->save();
-      $node->setAttribute('src', $copy);
+      $node->setAttribute('src', file_create_url($copy));
     }
     return Html::serialize($dom);
   }
