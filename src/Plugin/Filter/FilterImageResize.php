@@ -104,32 +104,31 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    *   An list of images.
    */
   private function getImages($text) {
+    global $base_url;
     $dom = Html::load($text);
     $xpath = new \DOMXPath($dom);
     /** @var \DOMNode $node */
     foreach ($xpath->query('//img') as $node) {
       $file = $this->entityRepository->loadEntityByUuid('file', $node->getAttribute('data-entity-uuid'));
-      $image = $this->imageFactory->get($file->getFileUri());
-
+      $image = $this->imageFactory->get($node->getAttribute('src'));
       // Checking if the image needs to be resized.
       if ($image->getWidth() == $node->getAttribute('width') && $image->getHeight() == $node->getAttribute('height')) {
         continue;
       }
-
+      $target = file_uri_target($file->getFileUri());
       // Checking if the image was already resized:
-      if (file_exists('public://resize/' . $file->label())) {
-        $node->setAttribute('src', file_create_url('public://resize/' . $file->label()));
+      if (file_exists('public://resize/' . $target)) {
+        $relative_path = str_replace($base_url, '', file_create_url('public://resize/' . $target));
+        $node->setAttribute('src', $relative_path);
         continue;
       }
       // Checks if the resize filter exists if is not then create it.
-      if (!file_exists('public://resize')) {
-        $this->fileSystem->mkdir('public://resize');
-      }
-      $copy = file_unmanaged_copy($file->getFileUri(), 'public://resize/' . $file->label(), FILE_EXISTS_REPLACE);
+      $copy = file_unmanaged_copy($file->getFileUri(), 'public://resize/' . $target, FILE_EXISTS_REPLACE);
       $copy_image = $this->imageFactory->get($copy);
       $copy_image->resize($node->getAttribute('width'), $node->getAttribute('height'));
       $copy_image->save();
-      $node->setAttribute('src', file_create_url($copy));
+      $relative_path = str_replace($base_url, '', file_create_url($copy));
+      $node->setAttribute('src', $relative_path);
     }
     return Html::serialize($dom);
   }
