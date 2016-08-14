@@ -104,7 +104,6 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    *   An list of images.
    */
   private function getImages($text) {
-    global $base_url;
     $dom = Html::load($text);
     $xpath = new \DOMXPath($dom);
     /** @var \DOMNode $node */
@@ -118,17 +117,22 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       $target = file_uri_target($file->getFileUri());
       // Checking if the image was already resized:
       if (file_exists('public://resize/' . $target)) {
-        $relative_path = str_replace($base_url, '', file_create_url('public://resize/' . $target));
-        $node->setAttribute('src', $relative_path);
+        $node->setAttribute('src', file_url_transform_relative(file_create_url('public://resize/' . $target)));
         continue;
       }
+      // Delete this when https://www.drupal.org/node/2211657#comment-11510213
+      // be fixed.
+      $dirname = $this->fileSystem->dirname('public://resize/' . $target);
+      if (!file_exists($dirname)) {
+        file_prepare_directory($dirname, FILE_CREATE_DIRECTORY);
+      }
+
       // Checks if the resize filter exists if is not then create it.
       $copy = file_unmanaged_copy($file->getFileUri(), 'public://resize/' . $target, FILE_EXISTS_REPLACE);
       $copy_image = $this->imageFactory->get($copy);
       $copy_image->resize($node->getAttribute('width'), $node->getAttribute('height'));
       $copy_image->save();
-      $relative_path = str_replace($base_url, '', file_create_url($copy));
-      $node->setAttribute('src', $relative_path);
+      $node->setAttribute('src', file_url_transform_relative(file_create_url($copy)));
     }
     return Html::serialize($dom);
   }
