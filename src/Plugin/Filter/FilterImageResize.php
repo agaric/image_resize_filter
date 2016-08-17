@@ -109,6 +109,10 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
     /** @var \DOMNode $node */
     foreach ($xpath->query('//img') as $node) {
       $file = $this->entityRepository->loadEntityByUuid('file', $node->getAttribute('data-entity-uuid'));
+      // If the image hasn't an uuid then don't try to resize it.
+      if (is_null($file)) {
+        continue;
+      }
       $image = $this->imageFactory->get($node->getAttribute('src'));
       // Checking if the image needs to be resized.
       if ($image->getWidth() == $node->getAttribute('width') && $image->getHeight() == $node->getAttribute('height')) {
