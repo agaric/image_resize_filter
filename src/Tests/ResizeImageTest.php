@@ -94,7 +94,7 @@ class ResizeImageTest extends WebTestBase {
       'comment_body[0][value]' => implode("\n", $comment),
     );
     $this->drupalPostForm('node/' . $this->node->id(), $edit, t('Save'));
-    $expected = 'public://resize/druplicon.png';
+    $expected = 'public://resize/druplicon-44x50.png';
     $expected_relative_path = str_replace($base_url, '', file_create_url($expected));
     $this->assertNoRaw($relative_path, 'The original image is gone.');
     $this->assertRaw($expected_relative_path, 'The resize version was found.');

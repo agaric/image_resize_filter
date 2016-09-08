@@ -119,20 +119,23 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
         continue;
       }
       $target = file_uri_target($file->getFileUri());
+      $dirname = dirname($target) != '.' ? dirname($target) . '/' : '';
+      $info = pathinfo($file->getFileUri());
+      $resize_file_path = 'public://resize/' . $dirname . $info['filename'] . '-' . $node->getAttribute('width') . 'x' . $node->getAttribute('height') . '.' . $info['extension'];
       // Checking if the image was already resized:
-      if (file_exists('public://resize/' . $target)) {
-        $node->setAttribute('src', file_url_transform_relative(file_create_url('public://resize/' . $target)));
+      if (file_exists($resize_file_path)) {
+        $node->setAttribute('src', file_url_transform_relative(file_create_url($resize_file_path)));
         continue;
       }
       // Delete this when https://www.drupal.org/node/2211657#comment-11510213
       // be fixed.
-      $dirname = $this->fileSystem->dirname('public://resize/' . $target);
+      $dirname = $this->fileSystem->dirname($resize_file_path);
       if (!file_exists($dirname)) {
         file_prepare_directory($dirname, FILE_CREATE_DIRECTORY);
       }
 
       // Checks if the resize filter exists if is not then create it.
-      $copy = file_unmanaged_copy($file->getFileUri(), 'public://resize/' . $target, FILE_EXISTS_REPLACE);
+      $copy = file_unmanaged_copy($file->getFileUri(), $resize_file_path, FILE_EXISTS_REPLACE);
       $copy_image = $this->imageFactory->get($copy);
       $copy_image->resize($node->getAttribute('width'), $node->getAttribute('height'));
       $copy_image->save();
