@@ -1,0 +1,10 @@
+{
+    "name": "drupal/image_resize_filter",
+    "type": "drupal-module",
+    "description": "Image Resize Filter",
+    "keywords": ["Drupal"],
+    "license": "GPL-2.0+",
+    "minimum-stability": "dev",
+    "support": { },
+    "require": { }
+}
