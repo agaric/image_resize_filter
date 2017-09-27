@@ -26,19 +26,19 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
   /**
    * The EntityRepository instance.
    *
-   * @var EntityRepositoryInterface
+   * @var \Drupal\Core\Entity\EntityRepositoryInterface
    */
   protected $entityRepository;
   /**
    * ImageFactory instance.
    *
-   * @var ImageFactory
+   * @var \Drupal\Core\Image\ImageFactory
    */
   protected $imageFactory;
   /**
    * The FileSystem instance.
    *
-   * @var FileSystemInterface
+   * @var \Drupal\Core\File\FileSystemInterface
    */
   protected $fileSystem;
 
@@ -104,44 +104,80 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    *   An list of images.
    */
   private function getImages($text) {
-    $dom = Html::load($text);
-    $xpath = new \DOMXPath($dom);
-    /** @var \DOMNode $node */
-    foreach ($xpath->query('//img') as $node) {
-      $file = $this->entityRepository->loadEntityByUuid('file', $node->getAttribute('data-entity-uuid'));
-      // If the image hasn't an uuid then don't try to resize it.
-      if (is_null($file)) {
-        continue;
+    $settings = [];
+    $config = \Drupal::config('image_resize_filter');
+    $images = image_resize_filter_get_images($settings, $text);
+
+    $search = [];
+    $replace = [];
+
+    foreach ($images as $image) {
+      // Copy remote images locally.
+      if ($image['location'] == 'remote') {
+        // @todo Support remote Images
       }
-      $image = $this->imageFactory->get($node->getAttribute('src'));
-      // Checking if the image needs to be resized.
-      if ($image->getWidth() == $node->getAttribute('width') && $image->getHeight() == $node->getAttribute('height')) {
-        continue;
+      // Destination and local path are the same if we're just adding attributes.
+      elseif (!$image['resize']) {
+        $image['destination'] = $image['local_path'];
       }
-      $target = file_uri_target($file->getFileUri());
-      $dirname = dirname($target) != '.' ? dirname($target) . '/' : '';
-      $info = pathinfo($file->getFileUri());
-      $resize_file_path = 'public://resize/' . $dirname . $info['filename'] . '-' . $node->getAttribute('width') . 'x' . $node->getAttribute('height') . '.' . $info['extension'];
-      // Checking if the image was already resized:
-      if (file_exists($resize_file_path)) {
-        $node->setAttribute('src', file_url_transform_relative(file_create_url($resize_file_path)));
-        continue;
-      }
-      // Delete this when https://www.drupal.org/node/2211657#comment-11510213
-      // be fixed.
-      $dirname = $this->fileSystem->dirname($resize_file_path);
-      if (!file_exists($dirname)) {
-        file_prepare_directory($dirname, FILE_CREATE_DIRECTORY);
+      else {
+        $path_info = image_resize_filter_pathinfo($image['local_path']);
+        $local_file_dir = file_uri_target($path_info['dirname']);
+        $local_file_path = 'resize/' . ($local_file_dir ? $local_file_dir . '/' : '') . $path_info['filename'] . '-' . $image['expected_size']['width'] . 'x' . $image['expected_size']['height'] . '.' . $path_info['extension'];
+        $image['destination'] = $path_info['scheme'] . '://' . $local_file_path;
       }
 
-      // Checks if the resize filter exists if is not then create it.
-      $copy = file_unmanaged_copy($file->getFileUri(), $resize_file_path, FILE_EXISTS_REPLACE);
-      $copy_image = $this->imageFactory->get($copy);
-      $copy_image->resize($node->getAttribute('width'), $node->getAttribute('height'));
-      $copy_image->save();
-      $node->setAttribute('src', file_url_transform_relative(file_create_url($copy)));
+      if (!file_exists($image['destination'])) {
+        // Basic flood prevention of resizing.
+        $resize_threshold = $config->get('threshold');
+        $flood = \Drupal::flood();
+        //if (!flood_is_allowed('image_resize_filter_resize', $resize_threshold, 120)) {
+        if (!$flood->isAllowed('image_resize_filter_resize', $resize_threshold, 120)) {
+          drupal_set_message(t('Image resize threshold of @count per minute reached. Some images have not been resized. Resave the content to resize remaining images.', ['@count' => floor($resize_threshold / 2)]), 'error', FALSE);
+          continue;
+        }
+        $flood->register('image_resize_filter_resize', 120);
+
+        // Create the resize directory.
+        $directory = dirname($image['destination']);
+        file_prepare_directory($directory, FILE_CREATE_DIRECTORY);
+
+        // Move remote images into place if they are already the right size.
+        if ($image['location'] == 'remote' && !$image['resize']) {
+          $handle = fopen($image['destination'], 'w');
+          fwrite($handle, file_get_contents($image['local_path']));
+          fclose($handle);
+        }
+        // Resize the local image if the sizes don't match.
+        elseif ($image['resize']) {
+          //$res = image_load($image['local_path']);
+          $copy = file_unmanaged_copy($image['local_path'], $image['destination'], FILE_EXISTS_RENAME);
+          $res = $this->imageFactory->get($copy);
+          if ($res) {
+            // Image loaded successfully; resize.
+            $res->resize($image['expected_size']['width'], $image['expected_size']['height']);
+            $res->save();
+          }
+          else {
+            // Image failed to load - type doesn't match extension or invalid; keep original file
+            $handle = fopen($image['destination'], 'w');
+            fwrite($handle, file_get_contents($image['local_path']));
+            fclose($handle);
+          }
+        }
+        @chmod($image['destination'], 0664);
+      }
+
+      // Delete our temporary file if this is a remote image.
+      image_resize_filter_delete_temp_file($image['location'], $image['local_path']);
+
+      // Replace the existing image source with the resized image.
+      // Set the image we're currently updating in the callback function.
+      $search[] = $image['img_tag'];
+      $replace[] = image_resize_filter_image_tag($image, $settings);
     }
-    return Html::serialize($dom);
+
+    return str_replace($search, $replace, $text);
   }
 
 }

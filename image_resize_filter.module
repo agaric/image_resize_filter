@@ -6,6 +6,7 @@
  */
 
 use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Template\Attribute;
 
 /**
  * Implements hook_help().
@@ -23,3 +24,310 @@ function image_resize_filter_help($route_name, RouteMatchInterface $route_match)
   }
 }
 
+/**
+ * Parsing function to locate all images in a piece of text that need replacing.
+ *
+ * @param array $settings
+ *   An array of settings that will be used to identify which images need
+ *   updating. Includes the following:
+ *
+ *   - image_locations: An array of acceptable image locations. May contain any
+ *     of the following values: "remote". Remote image will be downloaded and
+ *     saved locally. This procedure is intensive as the images need to
+ *     be retrieved to have their dimensions checked.
+ * @param string $text
+ *   The text to be updated with the new img src tags.
+ *
+ * @return array
+ *   Return the images.
+ */
+function image_resize_filter_get_images(array $settings, $text) {
+  $images = array();
+
+  // @todo Allow the user to alter the settings.
+  $default_settings = [
+    'link' => 0,
+    'link_class' => '',
+    'link_rel' => '',
+    'image_locations' => array('local'),
+  ];
+
+  $settings = array_merge($default_settings, $settings);
+
+  // Find all image tags, ensuring that they have a src.
+  $matches = array();
+  preg_match_all('/((<a [^>]*>)[ ]*)?(<img[^>]*?src[ ]*=[ ]*"([^"]+)"[^>]*>)/i', $text, $matches);
+
+  // Loop through matches and find if replacements are necessary.
+  // $matches[0]: All complete image tags and preceding anchors.
+  // $matches[1]: The anchor tag of each match (if any).
+  // $matches[2]: The anchor tag and trailing whitespace of each match (if any).
+  // $matches[3]: The complete img tag.
+  // $matches[4]: The src value of each match.
+  foreach ($matches[0] as $key => $match) {
+    $has_link = (bool) $matches[1][$key];
+    $img_tag = $matches[3][$key];
+
+    // Extract the query string (image style token) if any from the url.
+    $src_query = parse_url($matches[4][$key], PHP_URL_QUERY);
+    if ($src_query) {
+      $src = substr($matches[4][$key], 0, - strlen($src_query) - 1);
+    }
+    else {
+      $src = $matches[4][$key];
+    }
+
+    $resize = NULL;
+    $image_size = NULL;
+    $attributes = array();
+
+    // Find attributes of this image tag.
+    $attribute_matches = array();
+    preg_match_all('/([\w\-]+)[ ]*=[ ]*"([^"]*)"/i', $img_tag, $attribute_matches);
+    foreach ($attribute_matches[0] as $key => $match) {
+      $attribute = $attribute_matches[1][$key];
+      $attribute_value = $attribute_matches[2][$key];
+      $attributes[$attribute] = $attribute_value;
+    }
+
+    // Height and width need to be matched specifically because they may come as
+    // either an HTML attribute or as part of a style attribute. FCKeditor
+    // specifically has a habit of using style tags instead of height and width.
+    foreach (array('width', 'height') as $property) {
+      $property_matches = array();
+      preg_match_all('/[ \'";]' . $property . '[ ]*([=:])[ ]*"?([0-9]+)(%?)"?/i', $img_tag, $property_matches);
+
+      // If this image uses percentage width or height, do not process it.
+      if (in_array('%', $property_matches[3])) {
+        $resize = FALSE;
+        break;
+      }
+
+      // In the odd scenario there is both a style="width: xx" and a width="xx"
+      // tag, base our calculations off the style tag, since that's what the
+      // browser will display.
+      $property_key = 0;
+      $property_count = count($property_matches[1]);
+      if ($property_count) {
+        $property_key = array_search(':', $property_matches[1]);
+      }
+      $attributes[$property] = !empty($property_matches[2][$property_key]) ? $property_matches[2][$property_key] : '';
+    }
+
+    // Determine if this is a local or remote file.
+    $base_path = base_path();
+    $location = 'unknown';
+    if (strpos($src, $base_path) === 0) {
+      $location = 'local';
+    }
+    elseif (preg_match('/http[s]?:\/\/' . preg_quote($_SERVER['HTTP_HOST'] . $base_path, '/') . '/', $src)) {
+      $location = 'local';
+    }
+    elseif (strpos($src, 'http') === 0) {
+      $location = 'remote';
+    }
+
+    // If not resizing images in this location, continue on to the next image.
+    if (!in_array($location, $settings['image_locations'])) {
+      continue;
+    }
+
+    // Convert the URL to a local path.
+    $local_path = NULL;
+    if ($location == 'local') {
+      // Remove the http:// and base path.
+      $local_path = preg_replace('/(http[s]?:\/\/' . preg_quote($_SERVER['HTTP_HOST'], '/') . ')?' . preg_quote(base_path(), '/') . '/', '', $src, 1);
+
+      // @todo In D8 do we need to do something to support multilaguage?
+      $lang_codes = '';
+
+      // Convert to a public file system URI.
+      /** @var \Drupal\Core\StreamWrapper\StreamWrapperManager $stream_wrapper_manager **/
+      $stream_wrapper_manager = \Drupal::service('stream_wrapper_manager');
+      $public_wrapper = $stream_wrapper_manager->getViaScheme('public');
+      $directory_path = $public_wrapper->getDirectoryPath() . '/';
+      if (preg_match('!^' . preg_quote($directory_path, '!') . '!', $local_path)) {
+        $local_path = 'public://' . preg_replace('!^' . preg_quote($directory_path, '!') . '!', '', $local_path);
+      }
+      // Convert to a file system path if using private files.
+      elseif (preg_match('!^(\?q\=)?' . $lang_codes . 'system/files/!', $local_path)) {
+        $local_path = 'private://' . preg_replace('!^(\?q\=)?' . $lang_codes . 'system/files/!', '', $local_path);
+      }
+      $local_path = rawurldecode($local_path);
+    }
+
+    // @todo Support get the original image from a preset
+    if ($location == 'remote') {
+      // @todo Support remote Images
+      continue;
+    }
+
+    // Get the image size.
+    if (is_file($local_path)) {
+      $image_size = @getimagesize($local_path);
+    }
+
+    // All this work and the image isn't even there. Bummer. Next image please.
+    if (empty($image_size)) {
+      image_resize_filter_delete_temp_file($location, $local_path);
+      continue;
+    }
+
+    $actual_width = (int) $image_size[0];
+    $actual_height = (int) $image_size[1];
+
+    // If either height or width is missing, calculate the other.
+    if (empty($attributes['width']) && empty($attributes['height'])) {
+      $attributes['width'] = $actual_width;
+      $attributes['height'] = $actual_height;
+    }
+    if (empty($attributes['height']) && is_numeric($attributes['width'])) {
+      $ratio = $actual_height / $actual_width;
+      $attributes['height'] = (int) round($ratio * $attributes['width']);
+    }
+    elseif (empty($attributes['width']) && is_numeric($attributes['height'])) {
+      $ratio = $actual_width / $actual_height;
+      $attributes['width'] = (int) round($ratio * $attributes['height']);
+    }
+
+    // Determine if this image requires a resize.
+    if (!isset($resize)) {
+      $resize = ($actual_width != $attributes['width'] || $actual_height != $attributes['height']);
+    }
+
+    // Skip processing if the image is a remote tracking image.
+    if ($location == 'remote' && $actual_width == 1 && $actual_height == 1) {
+      image_resize_filter_delete_temp_file($location, $local_path);
+      continue;
+    }
+
+    // Check the image extension by name.
+    $extension_matches = array();
+    preg_match('/\.([a-zA-Z0-9]+)$/', $src, $extension_matches);
+    if (!empty($extension_matches)) {
+      $extension = strtolower($extension_matches[1]);
+    }
+    // If the name extension failed (such as an image generated by a script),
+    // See if we can determine an extension by MIME type.
+    elseif (isset($image_size['mime'])) {
+      switch ($image_size['mime']) {
+        case 'image/png':
+          $extension = 'png';
+          break;
+        case 'image/gif':
+          $extension = 'gif';
+          break;
+        case 'image/jpeg':
+        case 'image/pjpeg':
+          $extension = 'jpg';
+          break;
+      }
+    }
+
+    // If we're not certain we can resize this image, skip it.
+    if (!isset($extension) || !in_array(strtolower($extension), array('png', 'jpg', 'jpeg', 'gif'))) {
+      image_resize_filter_delete_temp_file($location, $local_path);
+      continue;
+    }
+
+    // If getting this far, the image exists and is not the right size, needs
+    // to be saved locally from a remote server, or needs attributes added.
+    // Add all information to a list of images that need resizing.
+    $images[] = array(
+      'expected_size' => array('width' => $attributes['width'], 'height' => $attributes['height']),
+      'actual_size' => array('width' => $image_size[0], 'height' => $image_size[1]),
+      'attributes' => $attributes,
+      'resize' => $resize,
+      'img_tag' => $img_tag,
+      'has_link' => $has_link,
+      'original' => $src,
+      'original_query' => $src_query,
+      'location' => $location,
+      'local_path' => $local_path,
+      'mime' => $image_size['mime'],
+      'extension' => $extension,
+    );
+  }
+
+  return $images;
+}
+
+/**
+ * A short-cut function to delete temporary remote images.
+ */
+function image_resize_filter_delete_temp_file($source, $uri) {
+  if ($source == 'remote' && is_file($uri)) {
+    @unlink($uri);
+  }
+}
+
+
+/**
+ * Utility function to return path information.
+ */
+function image_resize_filter_pathinfo($uri) {
+  $info = pathinfo($uri);
+  $info['extension'] = substr($uri, strrpos($uri, '.') + 1);
+  $info['basename'] = basename($uri);
+  $info['filename'] = basename($uri, '.' . $info['extension']);
+  $info['scheme'] = file_uri_scheme($uri);
+
+  $stream_wrapper_manager = \Drupal::service('stream_wrapper_manager');
+  $stream_wrappers = $stream_wrapper_manager->getWrappers();
+  if (empty($info['scheme'])) {
+    foreach ($stream_wrappers as $scheme => $stream_wrapper) {
+      $scheme_base_path = $stream_wrapper_manager->getViaScheme($scheme)->getDirectoryPath();
+      $matches = array();
+      if (preg_match('/^' . preg_quote($scheme_base_path, '/') . '\/?(.*)/', $info['dirname'], $matches)) {
+        $info['scheme'] = $scheme;
+        $info['dirname'] = $scheme . '://' . $matches[1];
+        break;
+      }
+    }
+  }
+
+  return $info;
+}
+
+/**
+ * Generate a themed image tag based on an image array.
+ *
+ * @param $image
+ *   An array containing image information and properties.
+ * @param $settings
+ *   Settings for the input filter.
+ */
+function image_resize_filter_image_tag($image = NULL, $settings = NULL) {
+  $src = file_create_url($image['destination']);
+
+  // Strip the http:// from the path if the original did not include it.
+  if (!preg_match('/^http[s]?:\/\/' . preg_quote($_SERVER['HTTP_HOST']) . '/', $image['original'])) {
+    $src = preg_replace('/^http[s]?:\/\/' . preg_quote($_SERVER['HTTP_HOST']) . '/', '', $src);
+  }
+
+  // Restore any URL query.
+  if (isset($image['original_query'])) {
+    $src .= '?' . $image['original_query'];
+    $image['original'] .= '?' . $image['original_query'];
+  }
+
+  $image['attributes']['src'] = $src;
+
+  // Set the link properties if necessary.
+  $image['link'] = FALSE;
+  if ($image['resize'] && $settings['link'] && !$image['has_link']) {
+    $image['link'] = array();
+    $image['link']['attributes'] = array('href' => $image['original']);
+    if (!empty($settings['class'])) {
+      $image['link']['attributes']['class'] = $settings['class'];
+    }
+    if (!empty($settings['rel'])) {
+      $image['link']['attributes']['rel'] = $settings['rel'];
+    }
+    if (!empty($image['attributes']['title'])) {
+      $image['link']['attributes']['title'] = $image['attributes']['title'];
+    }
+  }
+
+  return '<img' . new Attribute($image['attributes']) . ' />';
+}
