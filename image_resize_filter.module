@@ -44,16 +44,6 @@ function image_resize_filter_help($route_name, RouteMatchInterface $route_match)
 function image_resize_filter_get_images(array $settings, $text) {
   $images = array();
 
-  // @todo Allow the user to alter the settings.
-  $default_settings = [
-    'link' => 0,
-    'link_class' => '',
-    'link_rel' => '',
-    'image_locations' => array('local'),
-  ];
-
-  $settings = array_merge($default_settings, $settings);
-
   // Find all image tags, ensuring that they have a src.
   $matches = array();
   preg_match_all('/((<a [^>]*>)[ ]*)?(<img[^>]*?src[ ]*=[ ]*"([^"]+)"[^>]*>)/i', $text, $matches);
@@ -158,8 +148,25 @@ function image_resize_filter_get_images(array $settings, $text) {
 
     // @todo Support get the original image from a preset
     if ($location == 'remote') {
-      // @todo Support remote Images
-      continue;
+      // Basic flood prevention on remote images.
+      $resize_threshold = 10;
+      // Basic flood prevention of resizing.
+      $flood = \Drupal::flood();
+
+      if (!$flood->isAllowed('image_resize_filter_remote', $resize_threshold, 120)) {
+        drupal_set_message(t('Image resize threshold of @count remote images has been reached. Please use fewer remote images.', array('@count' => $resize_threshold)), 'error', FALSE);
+        continue;
+      }
+      $flood->register('image_resize_filter_remote', 120);
+
+      $result = \Drupal::httpClient()->get($src);
+      if ($result->getStatusCode() == 200) {
+        $tmp_file = \Drupal::service('file_system')->tempnam('temporary://', 'image_resize_filter_');
+        $handle = fopen($tmp_file, 'w');
+        fwrite($handle, $result->getBody());
+        fclose($handle);
+        $local_path = $tmp_file;
+      }
     }
 
     // Get the image size.
@@ -312,22 +319,6 @@ function image_resize_filter_image_tag($image = NULL, $settings = NULL) {
   }
 
   $image['attributes']['src'] = $src;
-
-  // Set the link properties if necessary.
-  $image['link'] = FALSE;
-  if ($image['resize'] && $settings['link'] && !$image['has_link']) {
-    $image['link'] = array();
-    $image['link']['attributes'] = array('href' => $image['original']);
-    if (!empty($settings['class'])) {
-      $image['link']['attributes']['class'] = $settings['class'];
-    }
-    if (!empty($settings['rel'])) {
-      $image['link']['attributes']['rel'] = $settings['rel'];
-    }
-    if (!empty($image['attributes']['title'])) {
-      $image['link']['attributes']['title'] = $image['attributes']['title'];
-    }
-  }
 
   return '<img' . new Attribute($image['attributes']) . ' />';
 }

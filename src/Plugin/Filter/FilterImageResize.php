@@ -18,11 +18,7 @@ use Drupal\Core\Form\FormStateInterface;
  *   description = @Translation("The image resize filter analyze <img> tags and compare the given height and width attributes to the actual file. If the file dimensions are different than those given in the <img> tag, the image will be copied and the src attribute will be updated to point to the resized image."),
  *   type = Drupal\filter\Plugin\FilterInterface::TYPE_TRANSFORM_REVERSIBLE,
  *   settings = {
- *     "image_locations" = {
- *       "local"
- *     },
- *     "link_class" = "",
- *     "link_rel" = ""
+ *     "image_locations" = {},
  *   }
  * )
  */
@@ -91,9 +87,7 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    *   An list of images.
    */
   private function getImages($text) {
-    $settings = [];
-    $config = \Drupal::config('image_resize_filter');
-    $images = image_resize_filter_get_images($settings, $text);
+    $images = image_resize_filter_get_images($this->settings, $text);
 
     $search = [];
     $replace = [];
@@ -101,7 +95,8 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
     foreach ($images as $image) {
       // Copy remote images locally.
       if ($image['location'] == 'remote') {
-        // @todo Support remote Images
+        $local_file_path = 'resize/remote/' . md5(file_get_contents($image['local_path'])) . '-' . $image['expected_size']['width'] . 'x' . $image['expected_size']['height'] . '.'. $image['extension'];
+        $image['destination'] = file_default_scheme() . '://' . $local_file_path;
       }
       // Destination and local path are the same if we're just adding attributes.
       elseif (!$image['resize']) {
@@ -116,9 +111,8 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
 
       if (!file_exists($image['destination'])) {
         // Basic flood prevention of resizing.
-        $resize_threshold = $config->get('threshold');
+        $resize_threshold = 10;
         $flood = \Drupal::flood();
-        //if (!flood_is_allowed('image_resize_filter_resize', $resize_threshold, 120)) {
         if (!$flood->isAllowed('image_resize_filter_resize', $resize_threshold, 120)) {
           drupal_set_message(t('Image resize threshold of @count per minute reached. Some images have not been resized. Resave the content to resize remaining images.', ['@count' => floor($resize_threshold / 2)]), 'error', FALSE);
           continue;
@@ -137,7 +131,6 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
         }
         // Resize the local image if the sizes don't match.
         elseif ($image['resize']) {
-          //$res = image_load($image['local_path']);
           $copy = file_unmanaged_copy($image['local_path'], $image['destination'], FILE_EXISTS_RENAME);
           $res = $this->imageFactory->get($copy);
           if ($res) {
@@ -161,7 +154,7 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       // Replace the existing image source with the resized image.
       // Set the image we're currently updating in the callback function.
       $search[] = $image['img_tag'];
-      $replace[] = image_resize_filter_image_tag($image, $settings);
+      $replace[] = image_resize_filter_image_tag($image, $this->settings);
     }
 
     return str_replace($search, $replace, $text);
@@ -181,20 +174,6 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       '#default_value' => $this->settings['image_locations'],
       '#description' => $this->t('This option will determine which images will be analyzed for &lt;img&gt; tag differences. Enabling resizing of remote images can have performance impacts, as all images in the filtered text needs to be transferred via HTTP each time the filter cache is cleared.'),
     ];
-
-    $settings['link_class'] = array(
-      '#type' => 'textfield',
-      '#title' => t('Give to the resized images'),
-      '#size' => '10',
-      '#default_value' => $this->settings['link_class'],
-    );
-
-    $settings['link_rel'] = array(
-      '#type' => 'textfield',
-      '#title' => t('and/or a rel attribute'),
-      '#size' => '10',
-      '#default_value' => $this->settings['link_rel'],
-    );
 
     return $settings;
   }

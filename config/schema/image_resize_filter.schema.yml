@@ -8,10 +8,3 @@ filter_settings.filter_image_resize:
       sequence:
         type: string
         label: 'Image location'
-    link_class:
-      type: string
-      label: 'Link class'
-    link_rel:
-      type: string
-      label: 'Rel attribute'
-
