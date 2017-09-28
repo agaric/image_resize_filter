@@ -1,4 +1,4 @@
-filter_settings.image_resize:
+filter_settings.filter_image_resize:
   type: filter
   label: 'Image Resize Filter Settings'
   mapping:

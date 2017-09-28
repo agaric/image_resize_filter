@@ -13,7 +13,7 @@ use Drupal\Core\Form\FormStateInterface;
  * Provides a filter to resize images.
  *
  * @Filter(
- *   id = "image_resize",
+ *   id = "filter_image_resize",
  *   title = @Translation("Image resize filter"),
  *   description = @Translation("The image resize filter analyze <img> tags and compare the given height and width attributes to the actual file. If the file dimensions are different than those given in the <img> tag, the image will be copied and the src attribute will be updated to point to the resized image."),
  *   type = Drupal\filter\Plugin\FilterInterface::TYPE_TRANSFORM_REVERSIBLE,
