@@ -1,9 +1,17 @@
-image_resize_filter.settings:
-  type: config_object
+filter_settings.image_resize:
+  type: filter
   label: 'Image Resize Filter Settings'
   mapping:
-    threshold: 10
-    link: 0,
-    link_class: '',
-    link_rel: '',
+    image_locations:
+      type: sequence
+      label: 'Image locations'
+      sequence:
+        type: string
+        label: 'Image location'
+    link_class:
+      type: string
+      label: 'Link class'
+    link_rel:
+      type: string
+      label: 'Rel attribute'
 

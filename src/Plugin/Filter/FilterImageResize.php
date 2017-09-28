@@ -2,45 +2,38 @@
 
 namespace Drupal\image_resize_filter\Plugin\Filter;
 
-use Drupal\Component\Utility\Html;
 use Drupal\Core\Image\ImageFactory;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\filter\FilterProcessResult;
 use Drupal\filter\Plugin\FilterBase;
-use Drupal\Core\Entity\EntityRepositoryInterface;
-use Drupal\Core\File\FileSystemInterface;
+use Drupal\Core\Form\FormStateInterface;
 
 /**
  * Provides a filter to resize images.
  *
  * @Filter(
- *   id = "filter_image_resize",
+ *   id = "image_resize",
  *   title = @Translation("Image resize filter"),
  *   description = @Translation("The image resize filter analyze <img> tags and compare the given height and width attributes to the actual file. If the file dimensions are different than those given in the <img> tag, the image will be copied and the src attribute will be updated to point to the resized image."),
- *   type = Drupal\filter\Plugin\FilterInterface::TYPE_TRANSFORM_REVERSIBLE
+ *   type = Drupal\filter\Plugin\FilterInterface::TYPE_TRANSFORM_REVERSIBLE,
+ *   settings = {
+ *     "image_locations" = {
+ *       "local"
+ *     },
+ *     "link_class" = "",
+ *     "link_rel" = ""
+ *   }
  * )
  */
 class FilterImageResize extends FilterBase implements ContainerFactoryPluginInterface {
 
-  /**
-   * The EntityRepository instance.
-   *
-   * @var \Drupal\Core\Entity\EntityRepositoryInterface
-   */
-  protected $entityRepository;
   /**
    * ImageFactory instance.
    *
    * @var \Drupal\Core\Image\ImageFactory
    */
   protected $imageFactory;
-  /**
-   * The FileSystem instance.
-   *
-   * @var \Drupal\Core\File\FileSystemInterface
-   */
-  protected $fileSystem;
 
   /**
    * FilterImageResize constructor.
@@ -56,13 +49,9 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
     array $configuration,
     $plugin_id,
     $plugin_definition,
-    EntityRepositoryInterface $entity_repository,
-    ImageFactory $image_factory,
-    FileSystemInterface $file_system) {
+    ImageFactory $image_factory) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
-    $this->entityRepository = $entity_repository;
     $this->imageFactory = $image_factory;
-    $this->fileSystem = $file_system;
   }
 
   /**
@@ -73,9 +62,7 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
       $configuration,
       $plugin_id,
       $plugin_definition,
-      $container->get('entity.repository'),
-      $container->get('image.factory'),
-      $container->get('file_system')
+      $container->get('image.factory')
     );
   }
 
@@ -100,7 +87,7 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
    * @param string $text
    *   The text to be updated with the new img src tags.
    *
-   * @return array $images
+   * @return string $images
    *   An list of images.
    */
   private function getImages($text) {
@@ -178,6 +165,38 @@ class FilterImageResize extends FilterBase implements ContainerFactoryPluginInte
     }
 
     return str_replace($search, $replace, $text);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  function settingsForm(array $form, FormStateInterface $form_state) {
+    $settings['image_locations'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Resize images stored'),
+      '#options' => [
+        'local' => $this->t('Locally'),
+        'remote' => $this->t('On remote servers (note: this copies <em>all</em> remote images locally)')
+      ],
+      '#default_value' => $this->settings['image_locations'],
+      '#description' => $this->t('This option will determine which images will be analyzed for &lt;img&gt; tag differences. Enabling resizing of remote images can have performance impacts, as all images in the filtered text needs to be transferred via HTTP each time the filter cache is cleared.'),
+    ];
+
+    $settings['link_class'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Give to the resized images'),
+      '#size' => '10',
+      '#default_value' => $this->settings['link_class'],
+    );
+
+    $settings['link_rel'] = array(
+      '#type' => 'textfield',
+      '#title' => t('and/or a rel attribute'),
+      '#size' => '10',
+      '#default_value' => $this->settings['link_rel'],
+    );
+
+    return $settings;
   }
 
 }
